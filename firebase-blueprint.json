@@ -1,0 +1,119 @@
+{
+  "entities": {
+    "User": {
+      "title": "Usuário",
+      "description": "Informações da conta do pai/mãe",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "UID do Firebase Auth" },
+        "email": { "type": "string", "format": "email" },
+        "role": { "type": "string", "enum": ["admin"] }
+      },
+      "required": ["uid", "email", "role"]
+    },
+    "Child": {
+      "title": "Criança",
+      "description": "Perfil da criança gerenciado por um pai/mãe",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "parentId": { "type": "string" },
+        "name": { "type": "string" },
+        "themeColor": { "type": "string" },
+        "balance": { "type": "number" },
+        "level": { "type": "integer" },
+        "points": { "type": "integer" },
+        "monthlyGoal": { "type": "number" },
+        "avatarUrl": { "type": "string" },
+        "pin": { "type": "string", "description": "Senha de 4 dígitos para acesso da criança" }
+      },
+      "required": ["id", "parentId", "name", "balance", "pin"]
+    },
+    "Task": {
+      "title": "Tarefa",
+      "description": "Definição de uma tarefa ou comportamento",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "parentId": { "type": "string" },
+        "name": { "type": "string" },
+        "type": { "type": "string", "enum": ["positive", "negative"] },
+        "value": { "type": "number" },
+        "category": { "type": "string" },
+        "level": { "type": "string", "enum": ["leve", "médio", "grave"] },
+        "recoverable": { "type": "boolean" }
+      },
+      "required": ["id", "parentId", "name", "type", "value", "category", "level", "recoverable"]
+    },
+    "Transaction": {
+      "title": "Transação",
+      "description": "Registro de alteração de moedas para uma criança",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "childId": { "type": "string" },
+        "parentId": { "type": "string" },
+        "amount": { "type": "number" },
+        "type": { "type": "string", "enum": ["reward", "penalty", "recovery"] },
+        "description": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "isRecoverable": { "type": "boolean" },
+        "recovered": { "type": "boolean" }
+      },
+      "required": ["id", "childId", "parentId", "amount", "type", "timestamp"]
+    },
+    "MonthlyStatement": {
+      "title": "ExtratoMensal",
+      "description": "Registro histórico do fechamento mensal",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "childId": { "type": "string" },
+        "parentId": { "type": "string" },
+        "month": { "type": "integer" },
+        "year": { "type": "integer" },
+        "totalCoins": { "type": "number" },
+        "totalBrl": { "type": "number" },
+        "closingDate": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "childId", "parentId", "month", "year", "totalCoins", "totalBrl", "closingDate"]
+    },
+    "Notification": {
+      "title": "Notificação",
+      "description": "Feedback visual para as crianças",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "childId": { "type": "string" },
+        "parentId": { "type": "string" },
+        "message": { "type": "string" },
+        "type": { "type": "string", "enum": ["success", "warning", "info", "goal"] },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "read": { "type": "boolean" }
+      },
+      "required": ["id", "childId", "parentId", "message", "type", "timestamp"]
+    },
+    "LibraryItem": {
+      "title": "Item da Biblioteca",
+      "description": "Imagens customizadas adicionadas pelo administrador",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "parentId": { "type": "string" },
+        "url": { "type": "string" },
+        "name": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "parentId", "url", "name", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": { "schema": "User", "description": "Perfis de pais/mães" },
+    "/children/{childId}": { "schema": "Child", "description": "Perfis das crianças" },
+    "/tasks/{taskId}": { "schema": "Task", "description": "Definições de tarefas" },
+    "/transactions/{transactionId}": { "schema": "Transaction", "description": "Histórico de transações de moedas" },
+    "/monthlyStatements/{statementId}": { "schema": "MonthlyStatement", "description": "Registros de fechamento mensal" },
+    "/notifications/{notificationId}": { "schema": "Notification", "description": "Notificações das crianças" },
+    "/library/{itemId}": { "schema": "LibraryItem", "description": "Biblioteca de imagens do administrador" }
+  }
+}

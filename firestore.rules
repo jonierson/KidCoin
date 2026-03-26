@@ -1,0 +1,222 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: userId (Auth UID)
+    // Fields:
+    //   - uid: string (required)
+    //   - email: string (required)
+    //   - role: string (required, enum: ['admin'])
+    //
+    // Collection: children
+    // Document ID: childId
+    // Fields:
+    //   - id: string (required)
+    //   - parentId: string (required)
+    //   - name: string (required)
+    //   - avatar: string (optional)
+    //   - themeColor: string (optional)
+    //   - balance: number (required)
+    //   - level: integer (optional)
+    //   - points: integer (optional)
+    //   - monthlyGoal: number (optional)
+    //
+    // Collection: tasks
+    // Document ID: taskId
+    // Fields:
+    //   - id: string (required)
+    //   - parentId: string (required)
+    //   - name: string (required)
+    //   - type: string (required, enum: ['positive', 'negative'])
+    //   - value: number (required)
+    //   - category: string (required)
+    //   - level: string (required, enum: ['leve', 'médio', 'grave'])
+    //   - recoverable: bool (required)
+    //
+    // Collection: transactions
+    // Document ID: transactionId
+    // Fields:
+    //   - id: string (required)
+    //   - childId: string (required)
+    //   - parentId: string (required)
+    //   - amount: number (required)
+    //   - type: string (required, enum: ['reward', 'penalty', 'recovery'])
+    //   - description: string (optional)
+    //   - timestamp: timestamp (required)
+    //   - isRecoverable: bool (optional)
+    //   - recovered: bool (optional)
+    //
+    // Collection: monthlyStatements
+    // Document ID: statementId
+    // Fields:
+    //   - id: string (required)
+    //   - childId: string (required)
+    //   - parentId: string (required)
+    //   - month: integer (required)
+    //   - year: integer (required)
+    //   - totalCoins: number (required)
+    //   - totalBrl: number (required)
+    //   - closingDate: timestamp (required)
+    //
+    // Collection: notifications
+    // Document ID: notificationId
+    // Fields:
+    //   - id: string (required)
+    //   - childId: string (required)
+    //   - parentId: string (required)
+    //   - message: string (required)
+    //   - type: string (required, enum: ['success', 'warning', 'info', 'goal'])
+    //   - timestamp: timestamp (required)
+    //   - read: boolean (required)
+    //
+    // Collection: library
+    // Document ID: itemId
+    // Fields:
+    //   - id: string (required)
+    //   - parentId: string (required)
+    //   - url: string (required)
+    //   - name: string (required)
+    //   - createdAt: timestamp (required)
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+        ((exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin') ||
+          (request.auth.token.email == "jonierson.cruz@ifto.edu.br" && request.auth.token.email_verified == true)); // Default admin
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isParent(data) {
+      return isAuthenticated() && request.auth.uid == data.parentId;
+    }
+
+    function isDocParent() {
+      return isAuthenticated() && request.auth.uid == resource.data.parentId;
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'email', 'role']) &&
+             data.uid == request.auth.uid &&
+             isValidEmail(data.email) &&
+             data.role == 'admin';
+    }
+
+    function isValidChild(data) {
+      return data.keys().hasAll(['parentId', 'name', 'balance', 'pin']) &&
+             data.parentId == request.auth.uid &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 50 &&
+             data.balance is number &&
+             data.pin is string && data.pin.matches("^[0-9]{4}$") &&
+             (!('avatarUrl' in data) || data.avatarUrl is string);
+    }
+
+    function isValidTask(data) {
+      return data.keys().hasAll(['parentId', 'name', 'type', 'value', 'category', 'level', 'recoverable']) &&
+             data.parentId == request.auth.uid &&
+             data.name is string && data.name.size() > 0 &&
+             data.type in ['positive', 'negative'] &&
+             data.value is number && data.value >= 0 &&
+             data.category is string &&
+             data.level in ['leve', 'médio', 'grave'] &&
+             data.recoverable is bool;
+    }
+
+    function isValidTransaction(data) {
+      return data.keys().hasAll(['childId', 'parentId', 'amount', 'type', 'timestamp']) &&
+             data.parentId == request.auth.uid &&
+             data.type in ['reward', 'penalty', 'recovery'] &&
+             data.amount is number &&
+             data.timestamp is timestamp &&
+             (!('isRecoverable' in data) || data.isRecoverable is bool) &&
+             (!('recovered' in data) || data.recovered is bool);
+    }
+
+    function isValidNotification(data) {
+      return data.keys().hasAll(['childId', 'parentId', 'message', 'type', 'timestamp', 'read']) &&
+             data.parentId == request.auth.uid &&
+             data.type in ['success', 'warning', 'info', 'goal'] &&
+             data.timestamp is timestamp;
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidUser(request.resource.data);
+      allow update: if isOwner(userId) && isValidUser(request.resource.data);
+    }
+
+    match /children/{childId} {
+      allow get: if isAuthenticated();
+      allow list: if isAuthenticated(); // Allow login query (name + pin)
+      allow create: if isAuthenticated() && isValidChild(request.resource.data) && (isAdmin() || request.auth.uid == request.resource.data.parentId);
+      allow update: if (isAdmin() || isDocParent()) && isValidChild(request.resource.data);
+      allow delete: if isAdmin() || isDocParent();
+    }
+
+    match /tasks/{taskId} {
+      allow read: if isAuthenticated() && (isAdmin() || isParent(resource.data) || resource.data.parentId != null);
+      allow create: if isAuthenticated() && isValidTask(request.resource.data) && (isAdmin() || request.auth.uid == request.resource.data.parentId);
+      allow update: if (isAdmin() || isDocParent()) && isValidTask(request.resource.data);
+      allow delete: if isAdmin() || isDocParent();
+    }
+
+    match /transactions/{transactionId} {
+      allow read: if isAuthenticated() && (isAdmin() || isParent(resource.data) || resource.data.childId != null);
+      allow create: if isAuthenticated() && isValidTransaction(request.resource.data) && (isAdmin() || request.auth.uid == request.resource.data.parentId);
+      allow update: if (isAdmin() || isDocParent()) && isValidTransaction(request.resource.data) && 
+                    request.resource.data.diff(resource.data).affectedKeys().hasOnly(['recovered']);
+      allow delete: if isAdmin() || isDocParent();
+    }
+
+    match /monthlyStatements/{statementId} {
+      allow read: if isAuthenticated() && (isAdmin() || isParent(resource.data) || resource.data.childId != null);
+      allow create: if isAuthenticated() && (isAdmin() || request.resource.data.parentId == request.auth.uid);
+      allow update: if false;
+      allow delete: if isAdmin() || isDocParent();
+    }
+
+    match /notifications/{notificationId} {
+      allow read: if isAuthenticated() && (isAdmin() || isParent(resource.data) || resource.data.childId != null);
+      allow create: if isAuthenticated() && isValidNotification(request.resource.data) && (isAdmin() || request.auth.uid == request.resource.data.parentId);
+      allow update: if (isAdmin() || isDocParent()) && isValidNotification(request.resource.data);
+      allow delete: if isAdmin() || isDocParent();
+    }
+
+    match /library/{itemId} {
+      allow read: if isParent(resource.data);
+      allow create: if isAuthenticated() && request.resource.data.parentId == request.auth.uid;
+      allow update: if isDocParent() && request.resource.data.parentId == request.auth.uid;
+      allow delete: if isDocParent();
+    }
+
+    match /custom_avatars/{avatarId} {
+      allow read: if isParent(resource.data);
+      allow create: if isAuthenticated() && request.resource.data.parentId == request.auth.uid;
+      allow update: if isDocParent() && request.resource.data.parentId == request.auth.uid;
+      allow delete: if isDocParent();
+    }
+  }
+}
