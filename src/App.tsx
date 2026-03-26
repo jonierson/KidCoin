@@ -2818,7 +2818,7 @@ const HistoryView = ({ transactions, children, onRecover, onClear }: { transacti
                   <td className="px-4 md:px-6 py-4 text-xs md:text-sm font-medium text-slate-900">{children.find(c => c.id === t.childId)?.name}</td>
                   <td className="px-4 md:px-6 py-4 text-xs md:text-sm text-slate-600">
                     <div className="flex flex-col gap-1">
-                      <span className="truncate max-w-[120px] md:max-w-none">{t.description}</span>
+                      <span className="max-w-[120px] md:max-w-none">{t.description}</span>
                       <div className="flex flex-wrap gap-1">
                         <span className={cn(
                           "md:hidden px-1.5 py-0.5 rounded-full text-[8px] font-bold uppercase",
@@ -3192,7 +3192,7 @@ const ChildView = ({ child, tasks, transactions, notifications, onBack }: { chil
                         <Icon className="w-5 h-5" />
                       </div>
                       <div className="flex-1 min-w-0">
-                        <p className="font-bold text-slate-900 text-sm leading-tight truncate">{task.name}</p>
+                        <p className="font-bold text-slate-900 text-sm leading-tight">{task.name}</p>
                         <p className="text-[10px] text-slate-400 font-medium truncate">{task.category}</p>
                       </div>
                       <div className="text-right flex-shrink-0">
@@ -3230,7 +3230,7 @@ const ChildView = ({ child, tasks, transactions, notifications, onBack }: { chil
                           <Icon className="w-5 h-5" />
                         </div>
                         <div className="flex-1 min-w-0">
-                          <p className="font-bold text-slate-900 text-sm leading-tight truncate">{task.name}</p>
+                          <p className="font-bold text-slate-900 text-sm leading-tight">{task.name}</p>
                           <div className="flex items-center gap-2">
                             <p className="text-[10px] text-slate-400 font-medium truncate">{task.category}</p>
                             <span className={cn(
