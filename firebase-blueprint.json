@@ -7,17 +7,35 @@
       "properties": {
         "uid": { "type": "string", "description": "UID do Firebase Auth" },
         "email": { "type": "string", "format": "email" },
-        "role": { "type": "string", "enum": ["admin"] }
+        "role": { "type": "string", "enum": ["admin"] },
+        "familyId": { "type": "string", "description": "ID da família à qual o usuário pertence" }
       },
       "required": ["uid", "email", "role"]
     },
-    "Child": {
-      "title": "Criança",
-      "description": "Perfil da criança gerenciado por um pai/mãe",
+    "Family": {
+      "title": "Família",
+      "description": "Grupo de acesso compartilhado",
       "type": "object",
       "properties": {
         "id": { "type": "string" },
-        "parentId": { "type": "string" },
+        "ownerUid": { "type": "string" },
+        "parentPin": { "type": "string", "description": "PIN de 4 dígitos para proteger ações dos pais" },
+        "members": { 
+          "type": "array", 
+          "items": { "type": "string" },
+          "description": "Lista de e-mails dos membros autorizados"
+        },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "ownerUid", "members"]
+    },
+    "Child": {
+      "title": "Criança",
+      "description": "Perfil da criança gerenciado por uma família",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "familyId": { "type": "string" },
         "name": { "type": "string" },
         "themeColor": { "type": "string" },
         "balance": { "type": "number" },
@@ -27,7 +45,7 @@
         "avatarUrl": { "type": "string" },
         "pin": { "type": "string", "description": "Senha de 4 dígitos para acesso da criança" }
       },
-      "required": ["id", "parentId", "name", "balance", "pin"]
+      "required": ["id", "familyId", "name", "balance", "pin"]
     },
     "Task": {
       "title": "Tarefa",
@@ -35,7 +53,7 @@
       "type": "object",
       "properties": {
         "id": { "type": "string" },
-        "parentId": { "type": "string" },
+        "familyId": { "type": "string" },
         "name": { "type": "string" },
         "type": { "type": "string", "enum": ["positive", "negative"] },
         "value": { "type": "number" },
@@ -43,7 +61,7 @@
         "level": { "type": "string", "enum": ["leve", "médio", "grave"] },
         "recoverable": { "type": "boolean" }
       },
-      "required": ["id", "parentId", "name", "type", "value", "category", "level", "recoverable"]
+      "required": ["id", "familyId", "name", "type", "value", "category", "level", "recoverable"]
     },
     "Transaction": {
       "title": "Transação",
@@ -52,7 +70,7 @@
       "properties": {
         "id": { "type": "string" },
         "childId": { "type": "string" },
-        "parentId": { "type": "string" },
+        "familyId": { "type": "string" },
         "amount": { "type": "number" },
         "type": { "type": "string", "enum": ["reward", "penalty", "recovery"] },
         "description": { "type": "string" },
@@ -60,7 +78,7 @@
         "isRecoverable": { "type": "boolean" },
         "recovered": { "type": "boolean" }
       },
-      "required": ["id", "childId", "parentId", "amount", "type", "timestamp"]
+      "required": ["id", "childId", "familyId", "amount", "type", "timestamp"]
     },
     "MonthlyStatement": {
       "title": "ExtratoMensal",
@@ -69,14 +87,14 @@
       "properties": {
         "id": { "type": "string" },
         "childId": { "type": "string" },
-        "parentId": { "type": "string" },
+        "familyId": { "type": "string" },
         "month": { "type": "integer" },
         "year": { "type": "integer" },
         "totalCoins": { "type": "number" },
         "totalBrl": { "type": "number" },
         "closingDate": { "type": "string", "format": "date-time" }
       },
-      "required": ["id", "childId", "parentId", "month", "year", "totalCoins", "totalBrl", "closingDate"]
+      "required": ["id", "childId", "familyId", "month", "year", "totalCoins", "totalBrl", "closingDate"]
     },
     "Notification": {
       "title": "Notificação",
@@ -85,35 +103,36 @@
       "properties": {
         "id": { "type": "string" },
         "childId": { "type": "string" },
-        "parentId": { "type": "string" },
+        "familyId": { "type": "string" },
         "message": { "type": "string" },
         "type": { "type": "string", "enum": ["success", "warning", "info", "goal"] },
         "timestamp": { "type": "string", "format": "date-time" },
         "read": { "type": "boolean" }
       },
-      "required": ["id", "childId", "parentId", "message", "type", "timestamp"]
+      "required": ["id", "childId", "familyId", "message", "type", "timestamp"]
     },
     "LibraryItem": {
       "title": "Item da Biblioteca",
-      "description": "Imagens customizadas adicionadas pelo administrador",
+      "description": "Imagens customizadas adicionadas pela família",
       "type": "object",
       "properties": {
         "id": { "type": "string" },
-        "parentId": { "type": "string" },
+        "familyId": { "type": "string" },
         "url": { "type": "string" },
         "name": { "type": "string" },
         "createdAt": { "type": "string", "format": "date-time" }
       },
-      "required": ["id", "parentId", "url", "name", "createdAt"]
+      "required": ["id", "familyId", "url", "name", "createdAt"]
     }
   },
   "firestore": {
     "/users/{userId}": { "schema": "User", "description": "Perfis de pais/mães" },
+    "/families/{familyId}": { "schema": "Family", "description": "Grupos de família" },
     "/children/{childId}": { "schema": "Child", "description": "Perfis das crianças" },
     "/tasks/{taskId}": { "schema": "Task", "description": "Definições de tarefas" },
     "/transactions/{transactionId}": { "schema": "Transaction", "description": "Histórico de transações de moedas" },
     "/monthlyStatements/{statementId}": { "schema": "MonthlyStatement", "description": "Registros de fechamento mensal" },
     "/notifications/{notificationId}": { "schema": "Notification", "description": "Notificações das crianças" },
-    "/library/{itemId}": { "schema": "LibraryItem", "description": "Biblioteca de imagens do administrador" }
+    "/library/{itemId}": { "schema": "LibraryItem", "description": "Biblioteca de imagens da família" }
   }
 }

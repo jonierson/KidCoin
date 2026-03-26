@@ -29,7 +29,9 @@ import {
   Timestamp,
   serverTimestamp,
   getDocFromServer,
-  writeBatch
+  writeBatch,
+  arrayUnion,
+  arrayRemove
 } from 'firebase/firestore';
 import { auth, db } from './firebase';
 import { 
@@ -75,7 +77,12 @@ import {
   Upload,
   Camera,
   Search,
-  Filter
+  Filter,
+  Lock,
+  Unlock,
+  Shield,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 import { 
   LineChart, 
@@ -135,11 +142,20 @@ interface UserProfile {
   uid: string;
   email: string;
   role: 'admin';
+  familyId?: string;
+}
+
+interface Family {
+  id: string;
+  ownerUid: string;
+  members: string[]; // emails
+  parentPin?: string;
+  createdAt: any;
 }
 
 interface Child {
   id: string;
-  parentId: string;
+  familyId: string;
   name: string;
   themeColor: string;
   balance: number;
@@ -152,7 +168,7 @@ interface Child {
 
 interface Task {
   id: string;
-  parentId: string;
+  familyId: string;
   name: string;
   type: 'positive' | 'negative';
   value: number;
@@ -164,7 +180,7 @@ interface Task {
 interface Transaction {
   id: string;
   childId: string;
-  parentId: string;
+  familyId: string;
   amount: number;
   type: 'reward' | 'penalty' | 'recovery';
   description: string;
@@ -176,7 +192,7 @@ interface Transaction {
 interface Notification {
   id: string;
   childId: string;
-  parentId: string;
+  familyId: string;
   message: string;
   type: 'success' | 'warning' | 'info' | 'goal';
   timestamp: any;
@@ -185,7 +201,7 @@ interface Notification {
 
 interface LibraryItem {
   id: string;
-  parentId: string;
+  familyId: string;
   url: string;
   name: string;
   createdAt: any;
@@ -194,7 +210,7 @@ interface LibraryItem {
 interface MonthlyStatement {
   id: string;
   childId: string;
-  parentId: string;
+  familyId: string;
   month: number;
   year: number;
   totalCoins: number;
@@ -578,17 +594,109 @@ const TASK_CATEGORIES = [
   'Desafios e Missões Especiais'
 ];
 
+const ParentLock = ({ family, onUnlock }: { family: Family, onUnlock: () => void }) => {
+  const [pin, setPin] = useState('');
+  const [error, setError] = useState(false);
+  const [showPin, setShowPin] = useState(false);
+
+  const handlePinSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (pin === family.parentPin) {
+      onUnlock();
+    } else {
+      setError(true);
+      setPin('');
+      setTimeout(() => setError(false), 2000);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[100] bg-slate-900/95 backdrop-blur-md flex items-center justify-center p-4">
+      <motion.div 
+        initial={{ opacity: 0, scale: 0.9 }}
+        animate={{ opacity: 1, scale: 1 }}
+        className="bg-white w-full max-w-md rounded-3xl p-8 shadow-2xl text-center"
+      >
+        <div className="w-20 h-20 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center mx-auto mb-6">
+          <Shield className="w-10 h-10" />
+        </div>
+        
+        <h2 className="text-2xl font-bold text-slate-900 mb-2">Painel Protegido</h2>
+        <p className="text-slate-500 mb-8">Insira o PIN de segurança para acessar as funções administrativas.</p>
+
+        <form onSubmit={handlePinSubmit} className="space-y-6">
+          <div className="relative">
+            <input
+              type={showPin ? "text" : "password"}
+              value={pin}
+              onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 4))}
+              placeholder="••••"
+              className={cn(
+                "w-full text-center text-4xl tracking-[1em] py-4 rounded-2xl border-2 outline-none transition-all",
+                error ? "border-rose-500 bg-rose-50 animate-shake" : "border-slate-100 focus:border-indigo-500 bg-slate-50"
+              )}
+              autoFocus
+            />
+            <button
+              type="button"
+              onClick={() => setShowPin(!showPin)}
+              className="absolute right-4 top-1/2 -translate-y-1/2 p-2 text-slate-400 hover:text-slate-600"
+            >
+              {showPin ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+            </button>
+          </div>
+
+          {error && (
+            <p className="text-rose-500 font-bold text-sm animate-bounce">PIN Incorreto!</p>
+          )}
+
+          <div className="grid grid-cols-3 gap-4">
+            {[1, 2, 3, 4, 5, 6, 7, 8, 9, 'C', 0, 'OK'].map((val) => (
+              <button
+                key={val}
+                type="button"
+                onClick={() => {
+                  if (val === 'C') setPin('');
+                  else if (val === 'OK') handlePinSubmit({ preventDefault: () => {} } as any);
+                  else setPin(prev => (prev + val).slice(0, 4));
+                }}
+                className={cn(
+                  "h-16 rounded-2xl text-xl font-bold transition-all active:scale-95",
+                  val === 'OK' ? "bg-indigo-600 text-white col-span-1" : 
+                  val === 'C' ? "bg-slate-100 text-slate-600" : "bg-slate-50 text-slate-900 hover:bg-slate-100"
+                )}
+              >
+                {val}
+              </button>
+            ))}
+          </div>
+        </form>
+
+        <button 
+          onClick={() => signOut(auth)}
+          className="mt-8 text-slate-400 hover:text-slate-600 text-sm font-medium flex items-center justify-center gap-2 mx-auto"
+        >
+          <LogOut className="w-4 h-4" />
+          Sair da Conta
+        </button>
+      </motion.div>
+    </div>
+  );
+};
+
 const Dashboard = () => {
   const [user, setUser] = useState<FirebaseUser | null>(null);
+  const [family, setFamily] = useState<Family | null>(null);
   const [children, setChildren] = useState<Child[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [libraryItems, setLibraryItems] = useState<LibraryItem[]>([]);
-  const [activeTab, setActiveTab] = useState<'overview' | 'children' | 'tasks' | 'history' | 'analytics' | 'library'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'children' | 'tasks' | 'history' | 'analytics' | 'library' | 'family'>('overview');
   const [selectedChildId, setSelectedChildId] = useState<string | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<string>('Todas');
   const [isChildMode, setIsChildMode] = useState(false);
+  const [isParentUnlocked, setIsParentUnlocked] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [confirmation, setConfirmation] = useState<{
@@ -646,68 +754,132 @@ const Dashboard = () => {
   useEffect(() => {
     if (!user && !isChildMode) return;
     
-    // If in child mode without a parent user, we need to fetch data differently or allow it in rules
-    // For now, we assume the parent is logged in or we'll handle it in rules
-    // For anonymous users (children), we MUST use the parentId from localStorage
-    // For Google users (parents), we use user.uid
-    const parentId = (isChildMode || user?.isAnonymous) 
-      ? localStorage.getItem('kidcoin_parent_id') 
-      : user?.uid;
-
-    if (!parentId) {
+    const fetchFamilyAndData = async () => {
+      let familyId = '';
+      
       if (isChildMode) {
-        // If we are in child mode but don't have a parentId yet, we might need to wait for auth or login
-        return;
+        familyId = localStorage.getItem('kidcoin_family_id') || '';
+        if (!familyId) {
+          // Fallback to parentId for legacy
+          familyId = localStorage.getItem('kidcoin_parent_id') || '';
+        }
+      } else if (user && !user.isAnonymous) {
+        // Parent mode
+        try {
+          // 1. Check if user already has a familyId in their profile
+          const userDoc = await getDoc(doc(db, 'users', user.uid));
+          if (userDoc.exists() && userDoc.data().familyId) {
+            familyId = userDoc.data().familyId;
+          } else {
+            // 2. Check if there's a family where this user is a member (by email)
+            const qFamily = query(collection(db, 'families'), where('members', 'array-contains', user.email));
+            const familySnap = await getDocs(qFamily);
+            
+            if (!familySnap.empty) {
+              familyId = familySnap.docs[0].id;
+              // Update user profile with familyId
+              await setDoc(doc(db, 'users', user.uid), { 
+                uid: user.uid, 
+                email: user.email, 
+                role: 'admin', 
+                familyId 
+              }, { merge: true });
+            } else {
+              // 3. Create a new family
+              const newFamilyRef = doc(collection(db, 'families'));
+              familyId = newFamilyRef.id;
+              await setDoc(newFamilyRef, {
+                id: familyId,
+                ownerUid: user.uid,
+                members: [user.email],
+                createdAt: serverTimestamp()
+              });
+              // Update user profile
+              await setDoc(doc(db, 'users', user.uid), { 
+                uid: user.uid, 
+                email: user.email, 
+                role: 'admin', 
+                familyId 
+              }, { merge: true });
+            }
+          }
+        } catch (err) {
+          console.error('Error fetching family:', err);
+        }
       }
-      return;
-    }
 
-    // If in child mode, we also want to make sure the specific child is fetched even if the list query is slow
-    let unsubSingleChild: (() => void) | null = null;
-    if (isChildMode && selectedChildId) {
-      unsubSingleChild = onSnapshot(doc(db, 'children', selectedChildId), (docSnap) => {
-        if (docSnap.exists()) {
-          const childData = { ...docSnap.data(), id: docSnap.id } as Child;
-          setChildren(prev => {
-            const filtered = prev.filter(c => c.id !== childData.id);
-            return [...filtered, childData];
-          });
+      if (!familyId) return;
+
+      // Store familyId for child mode
+      if (!isChildMode) {
+        localStorage.setItem('kidcoin_family_id', familyId);
+      }
+
+      // Listen to family document
+      const unsubFamily = onSnapshot(doc(db, 'families', familyId), (snap) => {
+        if (snap.exists()) {
+          setFamily({ ...snap.data(), id: snap.id } as Family);
         }
       });
-    }
 
-    const qChildren = query(collection(db, 'children'), where('parentId', '==', parentId));
-    const unsubChildren = onSnapshot(qChildren, (snap) => {
-      setChildren(snap.docs.map(d => ({ ...d.data(), id: d.id } as Child)));
-    }, (err) => handleFirestoreError(err, OperationType.LIST, 'children'));
+      // Listen to children
+      const qChildren = query(collection(db, 'children'), where('familyId', '==', familyId));
+      const unsubChildren = onSnapshot(qChildren, (snap) => {
+        setChildren(snap.docs.map(d => ({ ...d.data(), id: d.id } as Child)));
+      }, (err) => handleFirestoreError(err, OperationType.LIST, 'children'));
 
-    const qTasks = query(collection(db, 'tasks'), where('parentId', '==', parentId));
-    const unsubTasks = onSnapshot(qTasks, (snap) => {
-      setTasks(snap.docs.map(d => ({ ...d.data(), id: d.id } as Task)));
-    }, (err) => handleFirestoreError(err, OperationType.LIST, 'tasks'));
+      // Listen to tasks
+      const qTasks = query(collection(db, 'tasks'), where('familyId', '==', familyId));
+      const unsubTasks = onSnapshot(qTasks, (snap) => {
+        setTasks(snap.docs.map(d => ({ ...d.data(), id: d.id } as Task)));
+      }, (err) => handleFirestoreError(err, OperationType.LIST, 'tasks'));
 
-    const qTransactions = query(collection(db, 'transactions'), where('parentId', '==', parentId), orderBy('timestamp', 'desc'));
-    const unsubTransactions = onSnapshot(qTransactions, (snap) => {
-      setTransactions(snap.docs.map(d => ({ ...d.data(), id: d.id, timestamp: d.data().timestamp?.toDate() } as any)));
-    }, (err) => handleFirestoreError(err, OperationType.LIST, 'transactions'));
+      // Listen to transactions
+      const qTransactions = query(collection(db, 'transactions'), where('familyId', '==', familyId), orderBy('timestamp', 'desc'));
+      const unsubTransactions = onSnapshot(qTransactions, (snap) => {
+        setTransactions(snap.docs.map(d => ({ ...d.data(), id: d.id, timestamp: d.data().timestamp?.toDate() } as any)));
+      }, (err) => handleFirestoreError(err, OperationType.LIST, 'transactions'));
 
-    const qNotifications = query(collection(db, 'notifications'), where('parentId', '==', parentId), orderBy('timestamp', 'desc'));
-    const unsubNotifications = onSnapshot(qNotifications, (snap) => {
-      setNotifications(snap.docs.map(d => ({ ...d.data(), id: d.id, timestamp: d.data().timestamp?.toDate() } as any)));
-    }, (err) => handleFirestoreError(err, OperationType.LIST, 'notifications'));
+      // Listen to notifications
+      const qNotifications = query(collection(db, 'notifications'), where('familyId', '==', familyId), orderBy('timestamp', 'desc'));
+      const unsubNotifications = onSnapshot(qNotifications, (snap) => {
+        setNotifications(snap.docs.map(d => ({ ...d.data(), id: d.id, timestamp: d.data().timestamp?.toDate() } as any)));
+      }, (err) => handleFirestoreError(err, OperationType.LIST, 'notifications'));
 
-    const qLibrary = query(collection(db, 'library'), where('parentId', '==', parentId), orderBy('createdAt', 'desc'));
-    const unsubLibrary = onSnapshot(qLibrary, (snap) => {
-      setLibraryItems(snap.docs.map(d => ({ ...d.data(), id: d.id, createdAt: d.data().createdAt?.toDate() } as any)));
-    }, (err) => handleFirestoreError(err, OperationType.LIST, 'library'));
+      // Listen to library
+      const qLibrary = query(collection(db, 'library'), where('familyId', '==', familyId), orderBy('createdAt', 'desc'));
+      const unsubLibrary = onSnapshot(qLibrary, (snap) => {
+        setLibraryItems(snap.docs.map(d => ({ ...d.data(), id: d.id, createdAt: d.data().createdAt?.toDate() } as any)));
+      }, (err) => handleFirestoreError(err, OperationType.LIST, 'library'));
 
+      // If in child mode, we also want to make sure the specific child is fetched
+      let unsubSingleChild: (() => void) | null = null;
+      if (isChildMode && selectedChildId) {
+        unsubSingleChild = onSnapshot(doc(db, 'children', selectedChildId), (docSnap) => {
+          if (docSnap.exists()) {
+            const childData = { ...docSnap.data(), id: docSnap.id } as Child;
+            setChildren(prev => {
+              const filtered = prev.filter(c => c.id !== childData.id);
+              return [...filtered, childData];
+            });
+          }
+        });
+      }
+
+      return () => {
+        unsubFamily();
+        unsubChildren();
+        unsubTasks();
+        unsubTransactions();
+        unsubNotifications();
+        unsubLibrary();
+        if (unsubSingleChild) unsubSingleChild();
+      };
+    };
+
+    const cleanupPromise = fetchFamilyAndData();
     return () => {
-      unsubChildren();
-      unsubTasks();
-      unsubTransactions();
-      unsubNotifications();
-      unsubLibrary();
-      if (unsubSingleChild) unsubSingleChild();
+      cleanupPromise.then(cleanup => cleanup && cleanup());
     };
   }, [user, isChildMode, selectedChildId]);
 
@@ -773,7 +945,7 @@ const Dashboard = () => {
         // Add transaction
         await addDoc(collection(db, 'transactions'), {
           childId,
-          parentId: user.uid,
+          familyId: family?.id,
           amount,
           type: task.type === 'positive' ? 'reward' : 'penalty',
           description: task.name,
@@ -785,7 +957,7 @@ const Dashboard = () => {
         // Add notification
         await addDoc(collection(db, 'notifications'), {
           childId,
-          parentId: user.uid,
+          familyId: family?.id,
           message: task.type === 'positive' ? `Você ganhou ${task.value} moedas por: ${task.name}!` : `Você perdeu ${task.value} moedas por: ${task.name}`,
           type: task.type === 'positive' ? 'success' : 'warning',
           timestamp: serverTimestamp(),
@@ -796,7 +968,7 @@ const Dashboard = () => {
         if (newLevel > child.level) {
           await addDoc(collection(db, 'notifications'), {
             childId,
-            parentId: user.uid,
+            familyId: family?.id,
             message: `Subiu de Nível! Você agora está no Nível ${newLevel}!`,
             type: 'goal',
             timestamp: serverTimestamp(),
@@ -808,7 +980,7 @@ const Dashboard = () => {
         if (newBalance >= child.monthlyGoal && child.balance < child.monthlyGoal && child.monthlyGoal > 0) {
           await addDoc(collection(db, 'notifications'), {
             childId,
-            parentId: user.uid,
+            familyId: family?.id,
             message: `Meta Atingida! Você alcançou sua meta de ${child.monthlyGoal} moedas!`,
             type: 'goal',
             timestamp: serverTimestamp(),
@@ -851,7 +1023,7 @@ const Dashboard = () => {
     try {
       await addDoc(collection(db, 'monthlyStatements'), {
         childId,
-        parentId: user.uid,
+        familyId: family?.id,
         month,
         year,
         totalCoins: child.balance,
@@ -898,7 +1070,7 @@ const Dashboard = () => {
         // Add recovery transaction
         await addDoc(collection(db, 'transactions'), {
           childId: child.id,
-          parentId: user.uid,
+          familyId: family?.id,
           amount: recoveryAmount,
           type: 'recovery',
           description: `Recuperação (50%): ${transaction.description}`,
@@ -913,7 +1085,7 @@ const Dashboard = () => {
         // Add notification
         await addDoc(collection(db, 'notifications'), {
           childId: child.id,
-          parentId: user.uid,
+          familyId: family?.id,
           message: `Parabéns! Você recuperou ${recoveryAmount} moedas por pedir desculpas/reparar o dano em: ${transaction.description}`,
           type: 'success',
           timestamp: serverTimestamp(),
@@ -962,6 +1134,14 @@ const Dashboard = () => {
     );
   };
 
+  useEffect(() => {
+    if (family?.parentPin) {
+      setIsParentUnlocked(false);
+    } else {
+      setIsParentUnlocked(true);
+    }
+  }, [family?.parentPin]);
+
   const handleChildLogin = (child: Child) => {
     setChildren(prev => {
       const exists = prev.find(c => c.id === child.id);
@@ -972,7 +1152,7 @@ const Dashboard = () => {
     setIsChildMode(true);
     // Persist child session
     localStorage.setItem('kidcoin_child_id', child.id);
-    localStorage.setItem('kidcoin_parent_id', child.parentId);
+    localStorage.setItem('kidcoin_family_id', child.familyId);
   };
 
   const handleChildLogout = () => {
@@ -1046,6 +1226,11 @@ const Dashboard = () => {
 
   return (
     <div className="min-h-screen bg-slate-50 flex">
+      {/* Parent Lock Overlay */}
+      {!isChildMode && family?.parentPin && !isParentUnlocked && (
+        <ParentLock family={family} onUnlock={() => setIsParentUnlocked(true)} />
+      )}
+
       {/* Mobile Sidebar Drawer */}
       <AnimatePresence>
         {isMobileMenuOpen && (
@@ -1084,6 +1269,7 @@ const Dashboard = () => {
                 <SidebarLink icon={<Users />} label="Crianças" active={activeTab === 'children'} onClick={() => { setActiveTab('children'); setIsMobileMenuOpen(false); }} />
                 <SidebarLink icon={<ClipboardList />} label="Tarefas" active={activeTab === 'tasks'} onClick={() => { setActiveTab('tasks'); setIsMobileMenuOpen(false); }} />
                 <SidebarLink icon={<ImageIcon />} label="Biblioteca" active={activeTab === 'library'} onClick={() => { setActiveTab('library'); setIsMobileMenuOpen(false); }} />
+                <SidebarLink icon={<Users />} label="Família" active={activeTab === 'family'} onClick={() => { setActiveTab('family'); setIsMobileMenuOpen(false); }} />
                 <SidebarLink icon={<History />} label="Histórico" active={activeTab === 'history'} onClick={() => { setActiveTab('history'); setIsMobileMenuOpen(false); }} />
                 <SidebarLink icon={<TrendingUp />} label="Análises" active={activeTab === 'analytics'} onClick={() => { setActiveTab('analytics'); setIsMobileMenuOpen(false); }} />
               </nav>
@@ -1125,6 +1311,7 @@ const Dashboard = () => {
           <SidebarLink icon={<Users />} label="Crianças" active={activeTab === 'children'} onClick={() => setActiveTab('children')} />
           <SidebarLink icon={<ClipboardList />} label="Tarefas" active={activeTab === 'tasks'} onClick={() => setActiveTab('tasks')} />
           <SidebarLink icon={<ImageIcon />} label="Biblioteca" active={activeTab === 'library'} onClick={() => setActiveTab('library')} />
+          <SidebarLink icon={<Users />} label="Família" active={activeTab === 'family'} onClick={() => setActiveTab('family')} />
           <SidebarLink icon={<History />} label="Histórico" active={activeTab === 'history'} onClick={() => setActiveTab('history')} />
           <SidebarLink icon={<TrendingUp />} label="Análises" active={activeTab === 'analytics'} onClick={() => setActiveTab('analytics')} />
         </nav>
@@ -1171,6 +1358,18 @@ const Dashboard = () => {
             </h2>
           </div>
           <div className="flex items-center gap-4">
+            {family?.parentPin && (
+              <button 
+                onClick={() => setIsParentUnlocked(false)}
+                className={cn(
+                  "flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold transition-all",
+                  isParentUnlocked ? "bg-emerald-100 text-emerald-700 hover:bg-emerald-200" : "bg-rose-100 text-rose-700"
+                )}
+              >
+                {isParentUnlocked ? <Unlock className="w-3.5 h-3.5" /> : <Lock className="w-3.5 h-3.5" />}
+                {isParentUnlocked ? 'DESBLOQUEADO' : 'BLOQUEADO'}
+              </button>
+            )}
             <button className="p-2 text-slate-400 hover:text-slate-600 relative">
               <Bell className="w-5 h-5" />
               {notifications.some(n => !n.read) && <span className="absolute top-2 right-2 w-2 h-2 bg-red-500 rounded-full border-2 border-white"></span>}
@@ -1331,16 +1530,18 @@ const Dashboard = () => {
             <ChildManagement 
               children={children} 
               user={user} 
+              family={family}
               onClosing={handleMonthlyClosing} 
               closingId={closingId}
               libraryItems={libraryItems}
               transactions={transactions}
             />
           )}
-          {activeTab === 'tasks' && <TaskManagement tasks={tasks} user={user} />}
-          {activeTab === 'library' && <LibraryView items={libraryItems} user={user} children={children} />}
+          {activeTab === 'tasks' && <TaskManagement tasks={tasks} user={user} family={family} />}
+          {activeTab === 'library' && <LibraryView items={libraryItems} user={user} family={family} children={children} />}
           {activeTab === 'history' && <HistoryView transactions={transactions} children={children} onRecover={handleRecoverPenalty} onClear={handleClearHistory} />}
           {activeTab === 'analytics' && <AnalyticsView transactions={transactions} children={children} />}
+          {activeTab === 'family' && <FamilyManagement family={family} user={user} />}
 
           <AnimatePresence>
             {confirmation.isOpen && (
@@ -1383,7 +1584,7 @@ const BottomNavLink = ({ icon, label, active, onClick }: { icon: React.ReactNode
   </button>
 );
 
-const LibraryView = ({ items, user, children }: { items: LibraryItem[], user: any, children: Child[] }) => {
+const LibraryView = ({ items, user, family, children }: { items: LibraryItem[], user: any, family: Family | null, children: Child[] }) => {
   const [url, setUrl] = useState('');
   const [name, setName] = useState('');
   const [selectedImage, setSelectedImage] = useState<LibraryItem | null>(null);
@@ -1423,7 +1624,7 @@ const LibraryView = ({ items, user, children }: { items: LibraryItem[], user: an
     if (!url.trim() || !user) return;
     try {
       await addDoc(collection(db, 'library'), {
-        parentId: user.uid,
+        familyId: family?.id,
         url: url.trim(),
         name: name.trim() || 'Nova Imagem',
         createdAt: serverTimestamp()
@@ -1645,6 +1846,193 @@ const LibraryView = ({ items, user, children }: { items: LibraryItem[], user: an
   );
 };
 
+const FamilyManagement = ({ family, user }: { family: Family | null, user: any }) => {
+  const [newEmail, setNewEmail] = useState('');
+  const [isAdding, setIsAdding] = useState(false);
+  const [parentPin, setParentPin] = useState(family?.parentPin || '');
+  const [isUpdatingPin, setIsUpdatingPin] = useState(false);
+  const [showPin, setShowPin] = useState(false);
+
+  const handleUpdatePin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!family) return;
+    if (parentPin.length > 0 && parentPin.length !== 4) {
+      alert('O PIN deve ter 4 dígitos.');
+      return;
+    }
+
+    try {
+      setIsUpdatingPin(true);
+      await updateDoc(doc(db, 'families', family.id), {
+        parentPin: parentPin || null
+      });
+      alert('Configurações de segurança atualizadas!');
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `families/${family.id}`);
+    } finally {
+      setIsUpdatingPin(false);
+    }
+  };
+
+  const handleAddMember = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!family || !newEmail.trim()) return;
+    
+    const email = newEmail.trim().toLowerCase();
+    if (family.members.includes(email)) {
+      alert('Este e-mail já tem acesso.');
+      return;
+    }
+
+    setIsAdding(true);
+    try {
+      await updateDoc(doc(db, 'families', family.id), {
+        members: arrayUnion(email)
+      });
+      setNewEmail('');
+      alert('Acesso concedido com sucesso!');
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `families/${family.id}`);
+    } finally {
+      setIsAdding(false);
+    }
+  };
+
+  const handleRemoveMember = async (email: string) => {
+    if (!family) return;
+    if (email === user.email) {
+      alert('Você não pode remover seu próprio acesso.');
+      return;
+    }
+
+    try {
+      await updateDoc(doc(db, 'families', family.id), {
+        members: arrayRemove(email)
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `families/${family.id}`);
+    }
+  };
+
+  if (!family) return null;
+
+  const isOwner = family.ownerUid === user.uid;
+
+  return (
+    <div className="space-y-6">
+      <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
+        <h3 className="text-lg font-bold text-slate-900 mb-4 flex items-center gap-2">
+          <Users className="w-5 h-5 text-indigo-600" />
+          Acesso Compartilhado (Família)
+        </h3>
+        
+        <p className="text-sm text-slate-600 mb-6">
+          Adicione o e-mail de outro pai ou mãe para que eles possam gerenciar as mesmas crianças e tarefas.
+        </p>
+
+        {isOwner ? (
+          <form onSubmit={handleAddMember} className="flex gap-2 mb-8">
+            <input 
+              type="email" 
+              placeholder="E-mail do outro pai/mãe" 
+              value={newEmail}
+              onChange={e => setNewEmail(e.target.value)}
+              required
+              className="flex-1 px-4 py-2 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+            <button 
+              type="submit" 
+              disabled={isAdding}
+              className="bg-indigo-600 text-white px-6 py-2 rounded-xl font-bold hover:bg-indigo-700 transition-colors disabled:opacity-50"
+            >
+              Convidar
+            </button>
+          </form>
+        ) : (
+          <div className="p-4 bg-amber-50 border border-amber-100 rounded-xl text-amber-700 text-sm mb-8">
+            Apenas o proprietário da família ({family.members[0]}) pode adicionar ou remover membros.
+          </div>
+        )}
+
+        <div className="space-y-3">
+          <h4 className="text-sm font-bold text-slate-500 uppercase tracking-wider">Membros com Acesso</h4>
+          {family.members.map(email => (
+            <div key={email} className="flex items-center justify-between p-3 bg-slate-50 rounded-xl">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-full bg-indigo-100 text-indigo-600 flex items-center justify-center font-bold text-xs">
+                  {email.charAt(0).toUpperCase()}
+                </div>
+                <span className="text-sm font-medium text-slate-700">{email}</span>
+                {email === user.email && <span className="text-[10px] bg-indigo-100 text-indigo-600 px-2 py-0.5 rounded-full font-bold">VOCÊ</span>}
+              </div>
+              {isOwner && email !== user.email && (
+                <button 
+                  onClick={() => handleRemoveMember(email)}
+                  className="p-2 text-slate-400 hover:text-rose-600 transition-colors"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
+        <h3 className="text-lg font-bold text-slate-900 mb-4 flex items-center gap-2">
+          <Shield className="w-5 h-5 text-indigo-600" />
+          Segurança do Painel
+        </h3>
+        
+        <p className="text-sm text-slate-600 mb-6">
+          Defina um PIN de 4 dígitos para proteger o acesso às funções administrativas. Quando ativado, o painel será bloqueado após o login ou manualmente.
+        </p>
+
+        <form onSubmit={handleUpdatePin} className="space-y-4">
+          <div className="flex items-center gap-4">
+            <div className="relative flex-1 max-w-[200px]">
+              <input 
+                type={showPin ? "text" : "password"} 
+                placeholder="PIN de 4 dígitos" 
+                value={parentPin}
+                onChange={e => setParentPin(e.target.value.replace(/\D/g, '').slice(0, 4))}
+                className="w-full px-4 py-2 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-indigo-500 text-center tracking-widest font-bold"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPin(!showPin)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400"
+              >
+                {showPin ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
+            </div>
+            <button 
+              type="submit" 
+              disabled={isUpdatingPin}
+              className="bg-slate-900 text-white px-6 py-2 rounded-xl font-bold hover:bg-slate-800 transition-colors disabled:opacity-50"
+            >
+              Salvar PIN
+            </button>
+            {family.parentPin && (
+              <button 
+                type="button" 
+                onClick={async () => {
+                  if (window.confirm('Deseja realmente desativar a proteção por PIN?')) {
+                    setParentPin('');
+                    await updateDoc(doc(db, 'families', family.id), { parentPin: null });
+                  }
+                }}
+                className="text-rose-600 text-sm font-bold hover:underline"
+              >
+                Desativar Proteção
+              </button>
+            )}
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+};
 const SidebarLink = ({ icon, label, active, onClick }: { icon: React.ReactNode, label: string, active: boolean, onClick: () => void }) => (
   <button 
     onClick={onClick}
@@ -1671,7 +2059,15 @@ const StatCard = ({ title, value, icon, trend }: { title: string, value: string,
   </div>
 );
 
-const ChildManagement = ({ children, user, onClosing, closingId, libraryItems, transactions }: { children: Child[], user: any, onClosing: (id: string) => void, closingId: string | null, libraryItems: LibraryItem[], transactions: Transaction[] }) => {
+const ChildManagement = ({ children, user, family, onClosing, closingId, libraryItems, transactions }: { 
+  children: Child[], 
+  user: any, 
+  family: Family | null,
+  onClosing: (id: string) => void, 
+  closingId: string | null,
+  libraryItems: LibraryItem[],
+  transactions: Transaction[]
+}) => {
   const calculateGains = (childId: string) => {
     const now = new Date();
     const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
@@ -1705,7 +2101,7 @@ const ChildManagement = ({ children, user, onClosing, closingId, libraryItems, t
     e.preventDefault();
     try {
       await addDoc(collection(db, 'children'), {
-        parentId: user.uid,
+        familyId: family?.id,
         name,
         themeColor: color,
         balance: 0,
@@ -2026,7 +2422,7 @@ const AvatarPicker = ({ items, selectedUrl, onSelect }: { items: LibraryItem[], 
   );
 };
 
-const TaskManagement = ({ tasks, user }: { tasks: Task[], user: any }) => {
+const TaskManagement = ({ tasks, user, family }: { tasks: Task[], user: any, family: Family | null }) => {
   const [isAdding, setIsAdding] = useState(false);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
@@ -2058,7 +2454,7 @@ const TaskManagement = ({ tasks, user }: { tasks: Task[], user: any }) => {
     e.preventDefault();
     try {
       await addDoc(collection(db, 'tasks'), {
-        parentId: user.uid,
+        familyId: family?.id,
         name,
         type,
         value,

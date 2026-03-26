@@ -11,12 +11,21 @@ service cloud.firestore {
     //   - uid: string (required)
     //   - email: string (required)
     //   - role: string (required, enum: ['admin'])
+    //   - familyId: string (optional)
+    //
+    // Collection: families
+    // Document ID: familyId
+    // Fields:
+    //   - id: string (required)
+    //   - ownerUid: string (required)
+    //   - members: list (required, strings of emails)
+    //   - createdAt: timestamp (required)
     //
     // Collection: children
     // Document ID: childId
     // Fields:
     //   - id: string (required)
-    //   - parentId: string (required)
+    //   - familyId: string (required)
     //   - name: string (required)
     //   - avatar: string (optional)
     //   - themeColor: string (optional)
@@ -29,7 +38,7 @@ service cloud.firestore {
     // Document ID: taskId
     // Fields:
     //   - id: string (required)
-    //   - parentId: string (required)
+    //   - familyId: string (required)
     //   - name: string (required)
     //   - type: string (required, enum: ['positive', 'negative'])
     //   - value: number (required)
@@ -42,7 +51,7 @@ service cloud.firestore {
     // Fields:
     //   - id: string (required)
     //   - childId: string (required)
-    //   - parentId: string (required)
+    //   - familyId: string (required)
     //   - amount: number (required)
     //   - type: string (required, enum: ['reward', 'penalty', 'recovery'])
     //   - description: string (optional)
@@ -55,7 +64,7 @@ service cloud.firestore {
     // Fields:
     //   - id: string (required)
     //   - childId: string (required)
-    //   - parentId: string (required)
+    //   - familyId: string (required)
     //   - month: integer (required)
     //   - year: integer (required)
     //   - totalCoins: number (required)
@@ -67,7 +76,7 @@ service cloud.firestore {
     // Fields:
     //   - id: string (required)
     //   - childId: string (required)
-    //   - parentId: string (required)
+    //   - familyId: string (required)
     //   - message: string (required)
     //   - type: string (required, enum: ['success', 'warning', 'info', 'goal'])
     //   - timestamp: timestamp (required)
@@ -77,7 +86,7 @@ service cloud.firestore {
     // Document ID: itemId
     // Fields:
     //   - id: string (required)
-    //   - parentId: string (required)
+    //   - familyId: string (required)
     //   - url: string (required)
     //   - name: string (required)
     //   - createdAt: timestamp (required)
@@ -102,12 +111,24 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
+    function isFamilyMember(familyId) {
+      return isAuthenticated() && 
+        (exists(/databases/$(database)/documents/families/$(familyId)) &&
+         request.auth.token.email in get(/databases/$(database)/documents/families/$(familyId)).data.members);
+    }
+
+    function isFamilyOwner(familyId) {
+      return isAuthenticated() &&
+        (exists(/databases/$(database)/documents/families/$(familyId)) &&
+         get(/databases/$(database)/documents/families/$(familyId)).data.ownerUid == request.auth.uid);
+    }
+
     function isParent(data) {
-      return isAuthenticated() && request.auth.uid == data.parentId;
+      return isAuthenticated() && isFamilyMember(data.familyId);
     }
 
     function isDocParent() {
-      return isAuthenticated() && request.auth.uid == resource.data.parentId;
+      return isAuthenticated() && isFamilyMember(resource.data.familyId);
     }
 
     function isValidEmail(email) {
@@ -118,12 +139,21 @@ service cloud.firestore {
       return data.keys().hasAll(['uid', 'email', 'role']) &&
              data.uid == request.auth.uid &&
              isValidEmail(data.email) &&
-             data.role == 'admin';
+             data.role == 'admin' &&
+             (!('familyId' in data) || data.familyId is string);
+    }
+
+    function isValidFamily(data) {
+      return data.keys().hasAll(['id', 'ownerUid', 'members', 'createdAt']) &&
+             data.ownerUid == request.auth.uid &&
+             data.members is list &&
+             request.auth.token.email in data.members &&
+             (!('parentPin' in data) || (data.parentPin is string && data.parentPin.matches("^\\d{4}$")));
     }
 
     function isValidChild(data) {
-      return data.keys().hasAll(['parentId', 'name', 'balance', 'pin']) &&
-             data.parentId == request.auth.uid &&
+      return data.keys().hasAll(['familyId', 'name', 'balance', 'pin']) &&
+             isFamilyMember(data.familyId) &&
              data.name is string && data.name.size() > 0 && data.name.size() < 50 &&
              data.balance is number &&
              data.pin is string && data.pin.matches("^[0-9]{4}$") &&
@@ -131,8 +161,8 @@ service cloud.firestore {
     }
 
     function isValidTask(data) {
-      return data.keys().hasAll(['parentId', 'name', 'type', 'value', 'category', 'level', 'recoverable']) &&
-             data.parentId == request.auth.uid &&
+      return data.keys().hasAll(['familyId', 'name', 'type', 'value', 'category', 'level', 'recoverable']) &&
+             isFamilyMember(data.familyId) &&
              data.name is string && data.name.size() > 0 &&
              data.type in ['positive', 'negative'] &&
              data.value is number && data.value >= 0 &&
@@ -142,8 +172,8 @@ service cloud.firestore {
     }
 
     function isValidTransaction(data) {
-      return data.keys().hasAll(['childId', 'parentId', 'amount', 'type', 'timestamp']) &&
-             data.parentId == request.auth.uid &&
+      return data.keys().hasAll(['childId', 'familyId', 'amount', 'type', 'timestamp']) &&
+             isFamilyMember(data.familyId) &&
              data.type in ['reward', 'penalty', 'recovery'] &&
              data.amount is number &&
              data.timestamp is timestamp &&
@@ -152,8 +182,8 @@ service cloud.firestore {
     }
 
     function isValidNotification(data) {
-      return data.keys().hasAll(['childId', 'parentId', 'message', 'type', 'timestamp', 'read']) &&
-             data.parentId == request.auth.uid &&
+      return data.keys().hasAll(['childId', 'familyId', 'message', 'type', 'timestamp', 'read']) &&
+             isFamilyMember(data.familyId) &&
              data.type in ['success', 'warning', 'info', 'goal'] &&
              data.timestamp is timestamp;
     }
@@ -168,54 +198,64 @@ service cloud.firestore {
       allow update: if isOwner(userId) && isValidUser(request.resource.data);
     }
 
+    match /families/{familyId} {
+      allow read: if isAuthenticated() && (
+        (resource != null && request.auth.token.email in resource.data.members) || 
+        isAdmin()
+      );
+      allow create: if isAuthenticated() && isValidFamily(request.resource.data);
+      allow update: if isFamilyOwner(familyId) && isValidFamily(request.resource.data);
+      allow delete: if isFamilyOwner(familyId);
+    }
+
     match /children/{childId} {
       allow get: if isAuthenticated();
-      allow list: if isAuthenticated(); // Allow login query (name + pin)
-      allow create: if isAuthenticated() && isValidChild(request.resource.data) && (isAdmin() || request.auth.uid == request.resource.data.parentId);
+      allow list: if isAuthenticated(); // Needed for child login search by name
+      allow create: if isAuthenticated() && isValidChild(request.resource.data) && (isAdmin() || isFamilyMember(request.resource.data.familyId));
       allow update: if (isAdmin() || isDocParent()) && isValidChild(request.resource.data);
       allow delete: if isAdmin() || isDocParent();
     }
 
     match /tasks/{taskId} {
-      allow read: if isAuthenticated() && (isAdmin() || isParent(resource.data) || resource.data.parentId != null);
-      allow create: if isAuthenticated() && isValidTask(request.resource.data) && (isAdmin() || request.auth.uid == request.resource.data.parentId);
+      allow read: if isAuthenticated() && (isAdmin() || isParent(resource.data) || resource.data.familyId != null);
+      allow create: if isAuthenticated() && isValidTask(request.resource.data) && (isAdmin() || isFamilyMember(request.resource.data.familyId));
       allow update: if (isAdmin() || isDocParent()) && isValidTask(request.resource.data);
       allow delete: if isAdmin() || isDocParent();
     }
 
     match /transactions/{transactionId} {
-      allow read: if isAuthenticated() && (isAdmin() || isParent(resource.data) || resource.data.childId != null);
-      allow create: if isAuthenticated() && isValidTransaction(request.resource.data) && (isAdmin() || request.auth.uid == request.resource.data.parentId);
+      allow read: if isAuthenticated() && (isAdmin() || isParent(resource.data) || resource.data.familyId != null);
+      allow create: if isAuthenticated() && isValidTransaction(request.resource.data) && (isAdmin() || isFamilyMember(request.resource.data.familyId));
       allow update: if (isAdmin() || isDocParent()) && isValidTransaction(request.resource.data) && 
                     request.resource.data.diff(resource.data).affectedKeys().hasOnly(['recovered']);
       allow delete: if isAdmin() || isDocParent();
     }
 
     match /monthlyStatements/{statementId} {
-      allow read: if isAuthenticated() && (isAdmin() || isParent(resource.data) || resource.data.childId != null);
-      allow create: if isAuthenticated() && (isAdmin() || request.resource.data.parentId == request.auth.uid);
+      allow read: if isAuthenticated() && (isAdmin() || isParent(resource.data) || resource.data.familyId != null);
+      allow create: if isAuthenticated() && (isAdmin() || isFamilyMember(request.resource.data.familyId));
       allow update: if false;
       allow delete: if isAdmin() || isDocParent();
     }
 
     match /notifications/{notificationId} {
-      allow read: if isAuthenticated() && (isAdmin() || isParent(resource.data) || resource.data.childId != null);
-      allow create: if isAuthenticated() && isValidNotification(request.resource.data) && (isAdmin() || request.auth.uid == request.resource.data.parentId);
+      allow read: if isAuthenticated() && (isAdmin() || isParent(resource.data) || resource.data.familyId != null);
+      allow create: if isAuthenticated() && isValidNotification(request.resource.data) && (isAdmin() || isFamilyMember(request.resource.data.familyId));
       allow update: if (isAdmin() || isDocParent()) && isValidNotification(request.resource.data);
       allow delete: if isAdmin() || isDocParent();
     }
 
     match /library/{itemId} {
-      allow read: if isParent(resource.data);
-      allow create: if isAuthenticated() && request.resource.data.parentId == request.auth.uid;
-      allow update: if isDocParent() && request.resource.data.parentId == request.auth.uid;
-      allow delete: if isDocParent();
+      allow read: if isAuthenticated() && (isAdmin() || isParent(resource.data) || resource.data.familyId != null);
+      allow create: if isAuthenticated() && isFamilyMember(request.resource.data.familyId);
+      allow update: if (isAdmin() || isDocParent()) && isFamilyMember(request.resource.data.familyId);
+      allow delete: if isAdmin() || isDocParent();
     }
 
     match /custom_avatars/{avatarId} {
       allow read: if isParent(resource.data);
-      allow create: if isAuthenticated() && request.resource.data.parentId == request.auth.uid;
-      allow update: if isDocParent() && request.resource.data.parentId == request.auth.uid;
+      allow create: if isAuthenticated() && isFamilyMember(request.resource.data.familyId);
+      allow update: if isDocParent() && isFamilyMember(request.resource.data.familyId);
       allow delete: if isDocParent();
     }
   }
