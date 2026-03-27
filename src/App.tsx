@@ -150,6 +150,7 @@ interface Family {
   ownerUid: string;
   members: string[]; // emails
   parentPin?: string;
+  coinToRealRate?: number; // 1 moeda = X reais
   createdAt: any;
 }
 
@@ -1219,6 +1220,7 @@ const Dashboard = () => {
         tasks={tasks}
         transactions={transactions.filter(t => t.childId === selectedChild.id)}
         notifications={notifications.filter(n => n.childId === selectedChild.id)}
+        family={family}
         onBack={handleChildLogout}
       />
     );
@@ -1401,7 +1403,7 @@ const Dashboard = () => {
                   title="Saldo Total" 
                   value={`${children.reduce((acc, c) => acc + c.balance, 0)} moedas`} 
                   icon={<Coins className="text-indigo-600" />}
-                  trend="+12% desde o mês passado"
+                  trend={family?.coinToRealRate ? `Equivale a R$ ${(children.reduce((acc, c) => acc + c.balance, 0) * family.coinToRealRate).toFixed(2).replace('.', ',')}` : "+12% desde o mês passado"}
                 />
                 <StatCard 
                   title="Crianças Ativas" 
@@ -1852,6 +1854,8 @@ const FamilyManagement = ({ family, user }: { family: Family | null, user: any }
   const [parentPin, setParentPin] = useState(family?.parentPin || '');
   const [isUpdatingPin, setIsUpdatingPin] = useState(false);
   const [showPin, setShowPin] = useState(false);
+  const [coinRate, setCoinRate] = useState(family?.coinToRealRate?.toString() || '0');
+  const [isUpdatingRate, setIsUpdatingRate] = useState(false);
 
   const handleUpdatePin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1914,12 +1918,71 @@ const FamilyManagement = ({ family, user }: { family: Family | null, user: any }
     }
   };
 
+  const handleUpdateRate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!family) return;
+    
+    const rate = parseFloat(coinRate.replace(',', '.'));
+    if (isNaN(rate) || rate < 0) {
+      alert('Por favor, insira um valor válido para a conversão.');
+      return;
+    }
+
+    try {
+      setIsUpdatingRate(true);
+      await updateDoc(doc(db, 'families', family.id), {
+        coinToRealRate: rate
+      });
+      alert('Taxa de conversão atualizada!');
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `families/${family.id}`);
+    } finally {
+      setIsUpdatingRate(false);
+    }
+  };
+
   if (!family) return null;
 
   const isOwner = family.ownerUid === user.uid;
 
   return (
     <div className="space-y-6">
+      <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
+        <h3 className="text-lg font-bold text-slate-900 mb-4 flex items-center gap-2">
+          <DollarSign className="w-5 h-5 text-emerald-600" />
+          Conversão de Moedas (R$)
+        </h3>
+        
+        <p className="text-sm text-slate-600 mb-6">
+          Defina quanto vale cada moeda em Reais (R$). Isso ajudará a criança a entender o valor real do seu esforço.
+        </p>
+
+        <form onSubmit={handleUpdateRate} className="flex flex-col md:flex-row gap-4 items-start md:items-end">
+          <div className="w-full md:w-48">
+            <label className="block text-xs font-bold text-slate-500 uppercase mb-2">1 Moeda = R$</label>
+            <input 
+              type="text" 
+              placeholder="Ex: 0.10" 
+              value={coinRate}
+              onChange={e => setCoinRate(e.target.value)}
+              className="w-full px-4 py-2 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-emerald-500 font-bold"
+            />
+          </div>
+          <button 
+            type="submit" 
+            disabled={isUpdatingRate}
+            className="bg-emerald-600 text-white px-6 py-2 rounded-xl font-bold hover:bg-emerald-700 transition-colors disabled:opacity-50"
+          >
+            Salvar Taxa
+          </button>
+          {family.coinToRealRate !== undefined && (
+            <div className="text-sm font-medium text-slate-500 bg-slate-50 px-4 py-2 rounded-xl border border-slate-100">
+              Exemplo: 100 moedas = <span className="text-emerald-600 font-bold">R$ {(100 * family.coinToRealRate).toFixed(2).replace('.', ',')}</span>
+            </div>
+          )}
+        </form>
+      </div>
+
       <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
         <h3 className="text-lg font-bold text-slate-900 mb-4 flex items-center gap-2">
           <Users className="w-5 h-5 text-indigo-600" />
@@ -2319,7 +2382,14 @@ const ChildManagement = ({ children, user, family, onClosing, closingId, library
               <div>
                 <div className="flex justify-between text-sm mb-1">
                   <span className="text-slate-500">Progresso Mensal</span>
-                  <span className="font-bold text-slate-900">{child.balance} / {child.monthlyGoal} moedas</span>
+                  <div className="text-right">
+                    <span className="font-bold text-slate-900 block">{child.balance} / {child.monthlyGoal} moedas</span>
+                    {family?.coinToRealRate !== undefined && family.coinToRealRate > 0 && (
+                      <span className="text-[10px] font-bold text-emerald-600 uppercase">
+                        Saldo: R$ {(child.balance * family.coinToRealRate).toFixed(2).replace('.', ',')}
+                      </span>
+                    )}
+                  </div>
                 </div>
                 <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
                   <motion.div 
@@ -3001,7 +3071,7 @@ const AnalyticsView = ({ transactions, children }: { transactions: Transaction[]
   );
 };
 
-const ChildView = ({ child, tasks, transactions, notifications, onBack }: { child: Child, tasks: Task[], transactions: Transaction[], notifications: Notification[], onBack: () => void }) => {
+const ChildView = ({ child, tasks, transactions, notifications, family, onBack }: { child: Child, tasks: Task[], transactions: Transaction[], notifications: Notification[], family: Family | null, onBack: () => void }) => {
   const [taskTab, setTaskTab] = useState<'earn' | 'lose'>('earn');
   const dailyGain = useMemo(() => {
     const todayStart = new Date();
@@ -3105,12 +3175,25 @@ const ChildView = ({ child, tasks, transactions, notifications, onBack }: { chil
             </div>
           </div>
           <h2 className="text-3xl font-black text-slate-900 mb-2">Meu Saldo</h2>
+          {family?.coinToRealRate !== undefined && family.coinToRealRate > 0 && (
+            <div className="inline-flex items-center gap-2 bg-emerald-50 px-4 py-2 rounded-2xl border border-emerald-100 mb-4">
+              <DollarSign className="w-4 h-4 text-emerald-600" />
+              <span className="text-lg font-bold text-emerald-700">
+                R$ {(child.balance * family.coinToRealRate).toFixed(2).replace('.', ',')}
+              </span>
+            </div>
+          )}
           <p className="text-slate-500 font-medium mb-8">Você está indo muito bem, {child.name}!</p>
 
           <div className="grid grid-cols-2 gap-4">
             <div className="bg-slate-50 p-4 rounded-2xl">
               <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Ganho Hoje</p>
               <p className="text-xl font-bold text-slate-900">{dailyGain} / {DAILY_GAIN_LIMIT}</p>
+              {family?.coinToRealRate !== undefined && family.coinToRealRate > 0 && (
+                <p className="text-[10px] font-bold text-emerald-600 uppercase mt-1">
+                  R$ {(dailyGain * family.coinToRealRate).toFixed(2).replace('.', ',')}
+                </p>
+              )}
               <div className="mt-2 h-2 bg-slate-200 rounded-full overflow-hidden">
                 <div 
                   className={cn("h-full transition-all duration-500", dailyGain >= DAILY_GAIN_LIMIT ? "bg-amber-500" : "bg-emerald-500")} 
@@ -3121,6 +3204,11 @@ const ChildView = ({ child, tasks, transactions, notifications, onBack }: { chil
             <div className="bg-slate-50 p-4 rounded-2xl">
               <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Ganho Mensal</p>
               <p className="text-xl font-bold text-slate-900">{monthlyGain} / {child.monthlyGoal}</p>
+              {family?.coinToRealRate !== undefined && family.coinToRealRate > 0 && (
+                <p className="text-[10px] font-bold text-emerald-600 uppercase mt-1">
+                  R$ {(monthlyGain * family.coinToRealRate).toFixed(2).replace('.', ',')}
+                </p>
+              )}
               <div className="mt-2 h-2 bg-slate-200 rounded-full overflow-hidden">
                 <div 
                   className={cn("h-full transition-all duration-500", monthlyGain >= child.monthlyGoal ? "bg-amber-500" : "bg-indigo-500")} 
@@ -3131,6 +3219,11 @@ const ChildView = ({ child, tasks, transactions, notifications, onBack }: { chil
             <div className="bg-slate-50 p-4 rounded-2xl">
               <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Meta Mensal</p>
               <p className="text-xl font-bold text-slate-900">{child.balance} / {child.monthlyGoal}</p>
+              {family?.coinToRealRate !== undefined && family.coinToRealRate > 0 && (
+                <p className="text-[10px] font-bold text-emerald-600 uppercase mt-1">
+                  R$ {(child.balance * family.coinToRealRate).toFixed(2).replace('.', ',')}
+                </p>
+              )}
               <div className="mt-2 h-2 bg-slate-200 rounded-full overflow-hidden">
                 <div className="h-full bg-emerald-500" style={{ width: `${Math.min((child.balance / child.monthlyGoal) * 100, 100)}%` }}></div>
               </div>
