@@ -163,6 +163,7 @@ interface Child {
   level: number;
   points: number;
   monthlyGoal: number;
+  dailyGoal: number;
   avatarUrl?: string;
   pin: string;
 }
@@ -583,8 +584,6 @@ const Auth = ({ onChildLogin }: { onChildLogin?: (child: Child) => void }) => {
   );
 };
 
-const DAILY_GAIN_LIMIT = 10;
-
 const TASK_CATEGORIES = [
   'Responsabilidades Domésticas',
   'Estudos e Desenvolvimento Intelectual',
@@ -917,9 +916,10 @@ const Dashboard = () => {
 
     if (task.type === 'positive') {
       const { dailyGain, monthlyGain } = calculateGains(childId);
+      const limit = child.dailyGoal || 10;
       
-      if (dailyGain + task.value > DAILY_GAIN_LIMIT) {
-        alert(`Limite diário atingido! Ganho hoje: ${dailyGain}/${DAILY_GAIN_LIMIT} moedas.`);
+      if (dailyGain + task.value > limit) {
+        alert(`Limite diário atingido! Ganho hoje: ${dailyGain}/${limit} moedas.`);
         return;
       }
       
@@ -1048,9 +1048,10 @@ const Dashboard = () => {
     const recoveryAmount = Math.floor(Math.abs(transaction.amount) * 0.5);
     
     const { dailyGain, monthlyGain } = calculateGains(child.id);
+    const limit = child.dailyGoal || 10;
     
-    if (dailyGain + recoveryAmount > DAILY_GAIN_LIMIT) {
-      alert(`Limite diário atingido! Ganho hoje: ${dailyGain}/${DAILY_GAIN_LIMIT} moedas.`);
+    if (dailyGain + recoveryAmount > limit) {
+      alert(`Limite diário atingido! Ganho hoje: ${dailyGain}/${limit} moedas.`);
       return;
     }
     
@@ -2153,6 +2154,7 @@ const ChildManagement = ({ children, user, family, onClosing, closingId, library
   const [editingChild, setEditingChild] = useState<Child | null>(null);
   const [name, setName] = useState('');
   const [goal, setGoal] = useState(100);
+  const [dailyGoal, setDailyGoal] = useState(10);
   const [color, setColor] = useState('#4f46e5');
   const [pin, setPin] = useState('');
   const [selectedAvatar, setSelectedAvatar] = useState<string | undefined>();
@@ -2171,6 +2173,7 @@ const ChildManagement = ({ children, user, family, onClosing, closingId, library
         level: 1,
         points: 0,
         monthlyGoal: goal,
+        dailyGoal: dailyGoal,
         avatarUrl: selectedAvatar || '',
         pin: pin.trim() || '1234'
       });
@@ -2190,6 +2193,7 @@ const ChildManagement = ({ children, user, family, onClosing, closingId, library
       await updateDoc(doc(db, 'children', editingChild.id), {
         name,
         monthlyGoal: goal,
+        dailyGoal: dailyGoal,
         themeColor: color,
         pin: pin.trim() || editingChild.pin
       });
@@ -2230,6 +2234,7 @@ const ChildManagement = ({ children, user, family, onClosing, closingId, library
     setEditingChild(child);
     setName(child.name);
     setGoal(child.monthlyGoal);
+    setDailyGoal(child.dailyGoal || 10);
     setColor(child.themeColor);
     setPin(child.pin);
     setIsAdding(false);
@@ -2245,6 +2250,7 @@ const ChildManagement = ({ children, user, family, onClosing, closingId, library
             setEditingChild(null);
             setName('');
             setGoal(100);
+            setDailyGoal(10);
             setColor('#4f46e5');
             setPin('');
             setSelectedAvatar(undefined);
@@ -2277,6 +2283,10 @@ const ChildManagement = ({ children, user, family, onClosing, closingId, library
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">Meta Mensal (Moedas)</label>
               <input type="number" value={goal} onChange={e => setGoal(Number(e.target.value))} required className="w-full px-4 py-2 rounded-lg border border-slate-200" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Limite Diário (Moedas)</label>
+              <input type="number" value={dailyGoal} onChange={e => setDailyGoal(Number(e.target.value))} required className="w-full px-4 py-2 rounded-lg border border-slate-200" />
             </div>
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">Cor do Tema</label>
@@ -2349,15 +2359,15 @@ const ChildManagement = ({ children, user, family, onClosing, closingId, library
                   <div className="flex justify-between text-[10px] font-bold uppercase text-slate-400 mb-1">
                     <span>Ganho Hoje</span>
                     <span className={cn(
-                      calculateGains(child.id).dailyGain >= DAILY_GAIN_LIMIT ? "text-amber-500" : "text-slate-600"
+                      calculateGains(child.id).dailyGain >= (child.dailyGoal || 10) ? "text-amber-500" : "text-slate-600"
                     )}>
-                      {calculateGains(child.id).dailyGain} / {DAILY_GAIN_LIMIT}
+                      {calculateGains(child.id).dailyGain} / {child.dailyGoal || 10}
                     </span>
                   </div>
                   <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
                     <div 
-                      className={cn("h-full transition-all duration-500", calculateGains(child.id).dailyGain >= DAILY_GAIN_LIMIT ? "bg-amber-500" : "bg-emerald-500")} 
-                      style={{ width: `${Math.min((calculateGains(child.id).dailyGain / DAILY_GAIN_LIMIT) * 100, 100)}%` }}
+                      className={cn("h-full transition-all duration-500", calculateGains(child.id).dailyGain >= (child.dailyGoal || 10) ? "bg-amber-500" : "bg-emerald-500")} 
+                      style={{ width: `${Math.min((calculateGains(child.id).dailyGain / (child.dailyGoal || 10)) * 100, 100)}%` }}
                     />
                   </div>
                 </div>
@@ -3144,7 +3154,7 @@ const ChildView = ({ child, tasks, transactions, notifications, family, onBack }
           <div>
             <p className="text-sm font-bold text-indigo-900">Atenção aos seus limites!</p>
             <p className="text-xs text-indigo-700">
-              Você pode ganhar até <span className="font-bold">+{DAILY_GAIN_LIMIT} moedas</span> por dia e até <span className="font-bold">{child.monthlyGoal} moedas</span> por mês.
+              Você pode ganhar até <span className="font-bold">+{child.dailyGoal || 10} moedas</span> por dia e até <span className="font-bold">{child.monthlyGoal} moedas</span> por mês.
             </p>
           </div>
         </div>
@@ -3188,7 +3198,7 @@ const ChildView = ({ child, tasks, transactions, notifications, family, onBack }
           <div className="grid grid-cols-2 gap-4">
             <div className="bg-slate-50 p-4 rounded-2xl">
               <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Ganho Hoje</p>
-              <p className="text-xl font-bold text-slate-900">{dailyGain} / {DAILY_GAIN_LIMIT}</p>
+              <p className="text-xl font-bold text-slate-900">{dailyGain} / {child.dailyGoal || 10}</p>
               {family?.coinToRealRate !== undefined && family.coinToRealRate > 0 && (
                 <p className="text-[10px] font-bold text-emerald-600 uppercase mt-1">
                   R$ {(dailyGain * family.coinToRealRate).toFixed(2).replace('.', ',')}
@@ -3196,8 +3206,8 @@ const ChildView = ({ child, tasks, transactions, notifications, family, onBack }
               )}
               <div className="mt-2 h-2 bg-slate-200 rounded-full overflow-hidden">
                 <div 
-                  className={cn("h-full transition-all duration-500", dailyGain >= DAILY_GAIN_LIMIT ? "bg-amber-500" : "bg-emerald-500")} 
-                  style={{ width: `${Math.min((dailyGain / DAILY_GAIN_LIMIT) * 100, 100)}%` }}
+                  className={cn("h-full transition-all duration-500", dailyGain >= (child.dailyGoal || 10) ? "bg-amber-500" : "bg-emerald-500")} 
+                  style={{ width: `${Math.min((dailyGain / (child.dailyGoal || 10)) * 100, 100)}%` }}
                 ></div>
               </div>
             </div>
