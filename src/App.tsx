@@ -830,7 +830,7 @@ const Dashboard = () => {
         if (snap.exists() && active) {
           setFamily({ ...snap.data(), id: snap.id } as Family);
         }
-      });
+      }, (err) => handleFirestoreError(err, OperationType.GET, `families/${familyId}`));
       cleanupFunctions.push(unsubFamily);
 
       // Listen to children

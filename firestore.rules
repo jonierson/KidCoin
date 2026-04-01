@@ -199,10 +199,7 @@ service cloud.firestore {
     }
 
     match /families/{familyId} {
-      allow read: if isAuthenticated() && (
-        (resource != null && request.auth.token.email in resource.data.members) || 
-        isAdmin()
-      );
+      allow read: if isAuthenticated();
       allow create: if isAuthenticated() && isValidFamily(request.resource.data);
       allow update: if isFamilyOwner(familyId) && isValidFamily(request.resource.data);
       allow delete: if isFamilyOwner(familyId);
