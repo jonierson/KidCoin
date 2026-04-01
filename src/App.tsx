@@ -754,7 +754,10 @@ const Dashboard = () => {
   useEffect(() => {
     if (!user && !isChildMode) return;
     
-    const fetchFamilyAndData = async () => {
+    let active = true;
+    let cleanupFunctions: (() => void)[] = [];
+
+    const setupListeners = async () => {
       let familyId = '';
       
       if (isChildMode) {
@@ -768,12 +771,19 @@ const Dashboard = () => {
         try {
           // 1. Check if user already has a familyId in their profile
           const userDoc = await getDoc(doc(db, 'users', user.uid));
+          if (!active) return;
+
           if (userDoc.exists() && userDoc.data().familyId) {
             familyId = userDoc.data().familyId;
           } else {
             // 2. Check if there's a family where this user is a member (by email)
-            const qFamily = query(collection(db, 'families'), where('members', 'array-contains', user.email));
+            const qFamily = query(
+              collection(db, 'families'), 
+              where('members', 'array-contains', user.email),
+              limit(1)
+            );
             const familySnap = await getDocs(qFamily);
+            if (!active) return;
             
             if (!familySnap.empty) {
               familyId = familySnap.docs[0].id;
@@ -808,7 +818,7 @@ const Dashboard = () => {
         }
       }
 
-      if (!familyId) return;
+      if (!familyId || !active) return;
 
       // Store familyId for child mode
       if (!isChildMode) {
@@ -817,46 +827,66 @@ const Dashboard = () => {
 
       // Listen to family document
       const unsubFamily = onSnapshot(doc(db, 'families', familyId), (snap) => {
-        if (snap.exists()) {
+        if (snap.exists() && active) {
           setFamily({ ...snap.data(), id: snap.id } as Family);
         }
       });
+      cleanupFunctions.push(unsubFamily);
 
       // Listen to children
       const qChildren = query(collection(db, 'children'), where('familyId', '==', familyId));
       const unsubChildren = onSnapshot(qChildren, (snap) => {
-        setChildren(snap.docs.map(d => ({ ...d.data(), id: d.id } as Child)));
+        if (active) setChildren(snap.docs.map(d => ({ ...d.data(), id: d.id } as Child)));
       }, (err) => handleFirestoreError(err, OperationType.LIST, 'children'));
+      cleanupFunctions.push(unsubChildren);
 
       // Listen to tasks
       const qTasks = query(collection(db, 'tasks'), where('familyId', '==', familyId));
       const unsubTasks = onSnapshot(qTasks, (snap) => {
-        setTasks(snap.docs.map(d => ({ ...d.data(), id: d.id } as Task)));
+        if (active) setTasks(snap.docs.map(d => ({ ...d.data(), id: d.id } as Task)));
       }, (err) => handleFirestoreError(err, OperationType.LIST, 'tasks'));
+      cleanupFunctions.push(unsubTasks);
 
-      // Listen to transactions
-      const qTransactions = query(collection(db, 'transactions'), where('familyId', '==', familyId), orderBy('timestamp', 'desc'));
+      // Listen to transactions - limit to 100 most recent
+      const qTransactions = query(
+        collection(db, 'transactions'), 
+        where('familyId', '==', familyId), 
+        orderBy('timestamp', 'desc'),
+        limit(100)
+      );
       const unsubTransactions = onSnapshot(qTransactions, (snap) => {
-        setTransactions(snap.docs.map(d => ({ ...d.data(), id: d.id, timestamp: d.data().timestamp?.toDate() } as any)));
+        if (active) setTransactions(snap.docs.map(d => ({ ...d.data(), id: d.id, timestamp: d.data().timestamp?.toDate() } as any)));
       }, (err) => handleFirestoreError(err, OperationType.LIST, 'transactions'));
+      cleanupFunctions.push(unsubTransactions);
 
-      // Listen to notifications
-      const qNotifications = query(collection(db, 'notifications'), where('familyId', '==', familyId), orderBy('timestamp', 'desc'));
+      // Listen to notifications - limit to 50 most recent
+      const qNotifications = query(
+        collection(db, 'notifications'), 
+        where('familyId', '==', familyId), 
+        orderBy('timestamp', 'desc'),
+        limit(50)
+      );
       const unsubNotifications = onSnapshot(qNotifications, (snap) => {
-        setNotifications(snap.docs.map(d => ({ ...d.data(), id: d.id, timestamp: d.data().timestamp?.toDate() } as any)));
+        if (active) setNotifications(snap.docs.map(d => ({ ...d.data(), id: d.id, timestamp: d.data().timestamp?.toDate() } as any)));
       }, (err) => handleFirestoreError(err, OperationType.LIST, 'notifications'));
+      cleanupFunctions.push(unsubNotifications);
 
-      // Listen to library
-      const qLibrary = query(collection(db, 'library'), where('familyId', '==', familyId), orderBy('createdAt', 'desc'));
+      // Listen to library - limit to 50 items
+      const qLibrary = query(
+        collection(db, 'library'), 
+        where('familyId', '==', familyId), 
+        orderBy('createdAt', 'desc'),
+        limit(50)
+      );
       const unsubLibrary = onSnapshot(qLibrary, (snap) => {
-        setLibraryItems(snap.docs.map(d => ({ ...d.data(), id: d.id, createdAt: d.data().createdAt?.toDate() } as any)));
+        if (active) setLibraryItems(snap.docs.map(d => ({ ...d.data(), id: d.id, createdAt: d.data().createdAt?.toDate() } as any)));
       }, (err) => handleFirestoreError(err, OperationType.LIST, 'library'));
+      cleanupFunctions.push(unsubLibrary);
 
       // If in child mode, we also want to make sure the specific child is fetched
-      let unsubSingleChild: (() => void) | null = null;
       if (isChildMode && selectedChildId) {
-        unsubSingleChild = onSnapshot(doc(db, 'children', selectedChildId), (docSnap) => {
-          if (docSnap.exists()) {
+        const unsubSingleChild = onSnapshot(doc(db, 'children', selectedChildId), (docSnap) => {
+          if (docSnap.exists() && active) {
             const childData = { ...docSnap.data(), id: docSnap.id } as Child;
             setChildren(prev => {
               const filtered = prev.filter(c => c.id !== childData.id);
@@ -864,24 +894,17 @@ const Dashboard = () => {
             });
           }
         });
+        cleanupFunctions.push(unsubSingleChild);
       }
-
-      return () => {
-        unsubFamily();
-        unsubChildren();
-        unsubTasks();
-        unsubTransactions();
-        unsubNotifications();
-        unsubLibrary();
-        if (unsubSingleChild) unsubSingleChild();
-      };
     };
 
-    const cleanupPromise = fetchFamilyAndData();
+    setupListeners();
+
     return () => {
-      cleanupPromise.then(cleanup => cleanup && cleanup());
+      active = false;
+      cleanupFunctions.forEach(unsub => unsub());
     };
-  }, [user, isChildMode, selectedChildId]);
+  }, [user?.uid, isChildMode, selectedChildId]);
 
   const selectedChild = useMemo(() => children.find(c => c.id === selectedChildId), [children, selectedChildId]);
 
@@ -930,6 +953,7 @@ const Dashboard = () => {
     }
 
     const performAction = async () => {
+      if (!family) return;
       const amount = task.type === 'positive' ? task.value : -task.value;
       const newBalance = child.balance + amount;
       const newPoints = child.points + (task.type === 'positive' ? task.value : 0);
@@ -946,7 +970,7 @@ const Dashboard = () => {
         // Add transaction
         await addDoc(collection(db, 'transactions'), {
           childId,
-          familyId: family?.id,
+          familyId: family.id,
           amount,
           type: task.type === 'positive' ? 'reward' : 'penalty',
           description: task.name,
@@ -958,7 +982,7 @@ const Dashboard = () => {
         // Add notification
         await addDoc(collection(db, 'notifications'), {
           childId,
-          familyId: family?.id,
+          familyId: family.id,
           message: task.type === 'positive' ? `Você ganhou ${task.value} moedas por: ${task.name}!` : `Você perdeu ${task.value} moedas por: ${task.name}`,
           type: task.type === 'positive' ? 'success' : 'warning',
           timestamp: serverTimestamp(),
@@ -969,7 +993,7 @@ const Dashboard = () => {
         if (newLevel > child.level) {
           await addDoc(collection(db, 'notifications'), {
             childId,
-            familyId: family?.id,
+            familyId: family.id,
             message: `Subiu de Nível! Você agora está no Nível ${newLevel}!`,
             type: 'goal',
             timestamp: serverTimestamp(),
@@ -981,7 +1005,7 @@ const Dashboard = () => {
         if (newBalance >= child.monthlyGoal && child.balance < child.monthlyGoal && child.monthlyGoal > 0) {
           await addDoc(collection(db, 'notifications'), {
             childId,
-            familyId: family?.id,
+            familyId: family.id,
             message: `Meta Atingida! Você alcançou sua meta de ${child.monthlyGoal} moedas!`,
             type: 'goal',
             timestamp: serverTimestamp(),
@@ -1014,7 +1038,7 @@ const Dashboard = () => {
 
   const handleMonthlyClosing = async (childId: string) => {
     const child = children.find(c => c.id === childId);
-    if (!child || !user) return;
+    if (!child || !user || !family) return;
 
     setClosingId(childId);
     const now = new Date();
@@ -1024,15 +1048,20 @@ const Dashboard = () => {
     try {
       await addDoc(collection(db, 'monthlyStatements'), {
         childId,
-        familyId: family?.id,
+        familyId: family.id,
         month,
         year,
         totalCoins: child.balance,
-        totalBrl: child.balance, // 1 coin = 1 BRL
+        totalBrl: family.coinToRealRate ? child.balance * family.coinToRealRate : child.balance,
         closingDate: serverTimestamp()
       });
 
-      setSuccessMsg(`Extrato mensal gerado para ${child.name}: R$ ${child.balance.toFixed(2)}`);
+      // Reset child balance to 0 for the new month
+      await updateDoc(doc(db, 'children', childId), {
+        balance: 0
+      });
+
+      setSuccessMsg(`Mês fechado para ${child.name}. Saldo zerado e extrato gerado.`);
       setTimeout(() => setSuccessMsg(null), 5000);
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, 'monthly_closing');
@@ -1061,6 +1090,7 @@ const Dashboard = () => {
     }
 
     const performAction = async () => {
+      if (!family) return;
       const newBalance = child.balance + recoveryAmount;
 
       try {
@@ -1072,7 +1102,7 @@ const Dashboard = () => {
         // Add recovery transaction
         await addDoc(collection(db, 'transactions'), {
           childId: child.id,
-          familyId: family?.id,
+          familyId: family.id,
           amount: recoveryAmount,
           type: 'recovery',
           description: `Recuperação (50%): ${transaction.description}`,
@@ -1087,7 +1117,7 @@ const Dashboard = () => {
         // Add notification
         await addDoc(collection(db, 'notifications'), {
           childId: child.id,
-          familyId: family?.id,
+          familyId: family.id,
           message: `Parabéns! Você recuperou ${recoveryAmount} moedas por pedir desculpas/reparar o dano em: ${transaction.description}`,
           type: 'success',
           timestamp: serverTimestamp(),
@@ -1624,10 +1654,10 @@ const LibraryView = ({ items, user, family, children }: { items: LibraryItem[], 
 
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!url.trim() || !user) return;
+    if (!url.trim() || !user || !family) return;
     try {
       await addDoc(collection(db, 'library'), {
-        familyId: family?.id,
+        familyId: family.id,
         url: url.trim(),
         name: name.trim() || 'Nova Imagem',
         createdAt: serverTimestamp()
@@ -2160,13 +2190,15 @@ const ChildManagement = ({ children, user, family, onClosing, closingId, library
   const [selectedAvatar, setSelectedAvatar] = useState<string | undefined>();
   const [editingAvatarId, setEditingAvatarId] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [confirmClosingId, setConfirmClosingId] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!family) return;
     try {
       await addDoc(collection(db, 'children'), {
-        familyId: family?.id,
+        familyId: family.id,
         name,
         themeColor: color,
         balance: 0,
@@ -2412,7 +2444,7 @@ const ChildManagement = ({ children, user, family, onClosing, closingId, library
 
               <div className="flex gap-2 pt-2">
                 <button 
-                  onClick={() => onClosing(child.id)}
+                  onClick={() => setConfirmClosingId(child.id)}
                   disabled={closingId === child.id}
                   className="flex-1 bg-slate-900 text-white py-2 rounded-lg text-sm font-medium hover:bg-slate-800 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
                 >
@@ -2436,6 +2468,46 @@ const ChildManagement = ({ children, user, family, onClosing, closingId, library
       </div>
 
       <AnimatePresence>
+        {confirmClosingId && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-6">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.9 }}
+              className="bg-white rounded-3xl shadow-2xl max-w-sm w-full overflow-hidden"
+            >
+              <div className="p-8 text-center">
+                <div className="w-16 h-16 bg-amber-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <Calendar className="w-8 h-8 text-amber-600" />
+                </div>
+                <h3 className="text-xl font-bold text-slate-900 mb-2">Fechar Mês?</h3>
+                <p className="text-slate-500 mb-6">
+                  Você está prestes a fechar o mês de <strong>{children.find(c => c.id === confirmClosingId)?.name}</strong>. Isso irá gerar um extrato e <strong>ZERAR</strong> o saldo de moedas para o início de uma nova contagem.
+                </p>
+                <div className="flex gap-3">
+                  <button 
+                    onClick={() => setConfirmClosingId(null)}
+                    className="flex-1 px-6 py-3 bg-slate-100 text-slate-600 font-bold rounded-2xl hover:bg-slate-200 transition-all"
+                  >
+                    Cancelar
+                  </button>
+                  <button 
+                    onClick={() => {
+                      if (confirmClosingId) {
+                        onClosing(confirmClosingId);
+                        setConfirmClosingId(null);
+                      }
+                    }}
+                    className="flex-1 px-6 py-3 bg-indigo-600 text-white font-bold rounded-2xl hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100"
+                  >
+                    Confirmar
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
         {confirmDeleteId && (
           <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-6">
             <motion.div 
@@ -2532,9 +2604,10 @@ const TaskManagement = ({ tasks, user, family }: { tasks: Task[], user: any, fam
 
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!family) return;
     try {
       await addDoc(collection(db, 'tasks'), {
-        familyId: family?.id,
+        familyId: family.id,
         name,
         type,
         value,
