@@ -166,6 +166,7 @@ interface Child {
   dailyGoal: number;
   avatarUrl?: string;
   pin: string;
+  coinToRealRate?: number;
 }
 
 interface Task {
@@ -1961,10 +1962,21 @@ const FamilyManagement = ({ family, user }: { family: Family | null, user: any }
 
     try {
       setIsUpdatingRate(true);
-      await updateDoc(doc(db, 'families', family.id), {
+      const familyRef = doc(db, 'families', family.id);
+      await updateDoc(familyRef, {
         coinToRealRate: rate
       });
-      alert('Taxa de conversão atualizada!');
+
+      // Also update all children in this family for robust access
+      const q = query(collection(db, 'children'), where('familyId', '==', family.id));
+      const childrenSnap = await getDocs(q);
+      const batch = writeBatch(db);
+      childrenSnap.docs.forEach(childDoc => {
+        batch.update(childDoc.ref, { coinToRealRate: rate });
+      });
+      await batch.commit();
+
+      alert('Taxa de conversão atualizada para toda a família!');
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, `families/${family.id}`);
     } finally {
@@ -2207,7 +2219,8 @@ const ChildManagement = ({ children, user, family, onClosing, closingId, library
         monthlyGoal: goal,
         dailyGoal: dailyGoal,
         avatarUrl: selectedAvatar || '',
-        pin: pin.trim() || '1234'
+        pin: pin.trim() || '1234',
+        coinToRealRate: family.coinToRealRate || 0
       });
       setIsAdding(false);
       setName('');
@@ -3181,6 +3194,8 @@ const ChildView = ({ child, tasks, transactions, notifications, family, onBack }
   const nextLevelPoints = pointsForNextLevel(child.level);
   const progressToNext = ((child.points - pointsForNextLevel(child.level - 1)) / (nextLevelPoints - pointsForNextLevel(child.level - 1))) * 100;
 
+  const currentRate = child.coinToRealRate || family?.coinToRealRate || 0;
+
   const positiveTasks = tasks.filter(t => t.type === 'positive');
   const negativeTasks = tasks.filter(t => t.type === 'negative');
 
@@ -3258,11 +3273,11 @@ const ChildView = ({ child, tasks, transactions, notifications, family, onBack }
             </div>
           </div>
           <h2 className="text-3xl font-black text-slate-900 mb-2">Meu Saldo</h2>
-          {family?.coinToRealRate !== undefined && family.coinToRealRate > 0 && (
+          {currentRate > 0 && (
             <div className="inline-flex items-center gap-2 bg-emerald-50 px-4 py-2 rounded-2xl border border-emerald-100 mb-4">
               <DollarSign className="w-4 h-4 text-emerald-600" />
               <span className="text-lg font-bold text-emerald-700">
-                R$ {(child.balance * family.coinToRealRate).toFixed(2).replace('.', ',')}
+                R$ {(child.balance * currentRate).toFixed(2).replace('.', ',')}
               </span>
             </div>
           )}
@@ -3272,9 +3287,9 @@ const ChildView = ({ child, tasks, transactions, notifications, family, onBack }
             <div className="bg-slate-50 p-4 rounded-2xl">
               <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Ganho Hoje</p>
               <p className="text-xl font-bold text-slate-900">{dailyGain} / {child.dailyGoal || 10}</p>
-              {family?.coinToRealRate !== undefined && family.coinToRealRate > 0 && (
+              {currentRate > 0 && (
                 <p className="text-[10px] font-bold text-emerald-600 uppercase mt-1">
-                  R$ {(dailyGain * family.coinToRealRate).toFixed(2).replace('.', ',')}
+                  R$ {(dailyGain * currentRate).toFixed(2).replace('.', ',')}
                 </p>
               )}
               <div className="mt-2 h-2 bg-slate-200 rounded-full overflow-hidden">
@@ -3287,9 +3302,9 @@ const ChildView = ({ child, tasks, transactions, notifications, family, onBack }
             <div className="bg-slate-50 p-4 rounded-2xl">
               <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Ganho Mensal</p>
               <p className="text-xl font-bold text-slate-900">{monthlyGain} / {child.monthlyGoal}</p>
-              {family?.coinToRealRate !== undefined && family.coinToRealRate > 0 && (
+              {currentRate > 0 && (
                 <p className="text-[10px] font-bold text-emerald-600 uppercase mt-1">
-                  R$ {(monthlyGain * family.coinToRealRate).toFixed(2).replace('.', ',')}
+                  R$ {(monthlyGain * currentRate).toFixed(2).replace('.', ',')}
                 </p>
               )}
               <div className="mt-2 h-2 bg-slate-200 rounded-full overflow-hidden">
@@ -3302,9 +3317,9 @@ const ChildView = ({ child, tasks, transactions, notifications, family, onBack }
             <div className="bg-slate-50 p-4 rounded-2xl">
               <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Meta Mensal</p>
               <p className="text-xl font-bold text-slate-900">{child.balance} / {child.monthlyGoal}</p>
-              {family?.coinToRealRate !== undefined && family.coinToRealRate > 0 && (
+              {currentRate > 0 && (
                 <p className="text-[10px] font-bold text-emerald-600 uppercase mt-1">
-                  R$ {(child.balance * family.coinToRealRate).toFixed(2).replace('.', ',')}
+                  R$ {(child.balance * currentRate).toFixed(2).replace('.', ',')}
                 </p>
               )}
               <div className="mt-2 h-2 bg-slate-200 rounded-full overflow-hidden">

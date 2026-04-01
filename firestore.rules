@@ -157,7 +157,8 @@ service cloud.firestore {
              data.name is string && data.name.size() > 0 && data.name.size() < 50 &&
              data.balance is number &&
              data.pin is string && data.pin.matches("^[0-9]{4}$") &&
-             (!('avatarUrl' in data) || data.avatarUrl is string);
+             (!('avatarUrl' in data) || data.avatarUrl is string) &&
+             (!('coinToRealRate' in data) || data.coinToRealRate is number);
     }
 
     function isValidTask(data) {
